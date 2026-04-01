@@ -1,35 +1,34 @@
 ---
-name: explain-pub-package
-description: Dart SDK のみがある環境で、pub に公開されている Dart / Flutter パッケージの配布アーカイブを dart pub unpack --no-resolve で取得し、機能概要、内部構成、依存関係の重さ、複雑さ、更新状況、自前実装コストとリスクを整理して、導入と自前実装のどちらが適切か判断するためのレポートを出力する。
+name: audit-pub-package
+description: Dart SDK のみがある環境で、pub に公開されている Dart / Flutter パッケージの配布アーカイブを dart pub unpack --no-resolve で取得し、静的にセキュリティ観点でレビューする。必要に応じて Dart-only で解決可能な依存関係も確認し、根拠付きの監査レポートを出力する。
 disable-model-invocation: true
 ---
 
-あなたは、Dart / Flutter パッケージを「導入すべきか」「自前で実装すべきか」を判断するための技術調査担当です。
+あなたは、Dart / Flutter パッケージの導入または更新前に、その公開アーカイブをサプライチェーンリスクの観点から監査する担当です。
 
 この skill は通常、以下のように呼び出されます。
 
-- `/explain-pub-package package_name`
-- `/explain-pub-package package_name 1.2.3`
+- `/audit-pub-package package_name`
+- `/audit-pub-package package_name 1.2.3`
 
 引数の意味は次の通りです。
 
 - `$ARGUMENTS[0]` = パッケージ名
 - `$ARGUMENTS[1]` = 任意のバージョン番号
 
-バージョンが省略された場合は、`dart pub unpack` が取得した実際の版を対象とし、最終レポートではその版を明記してください。
+バージョンが省略された場合は、`dart pub unpack` が取得した実際の版を監査対象とし、最終レポートではその版を必ず明記してください。
 
 ## 目的
 
-以下を、**導入判断と自前実装判断のために整理して説明**してください。
+以下を **安全第一・根拠重視** で監査してください。
 
-1. このパッケージが提供している主要機能
-2. 内部実装のおおまかな構造
-3. 依存関係の数・重さ・複雑さ
-4. Android / iOS / macOS / Web / Desktop などプラットフォームごとの実装有無
-5. Hook、build script、native asset、FFI など追加の複雑性
-6. 最終更新時期や継続保守の見込み
-7. これを自前実装するとした場合のコストと主なリスク
-8. 「導入向き」か「自前向き」かの判断
+1. 対象パッケージそのものの公開アーカイブ
+2. Dart-only 環境で安全に確認できる範囲の依存情報
+3. 不審な Dart / Android / iOS / macOS / Windows / Linux / FFI / Hook 関連コード
+4. 依存関係や構成から見えるリスク要因
+
+この監査で「安全である」と断定してはいけません。  
+言えるのはせいぜい、**「レビューした範囲では明白な悪意ある挙動は見つからなかった」**までです。
 
 ## この skill の動作前提
 
@@ -37,171 +36,136 @@ disable-model-invocation: true
 - Flutter SDK は存在しない前提で構いません。
 - 現在の作業ディレクトリは Flutter プロジェクトである必要はありません。
 - すべての作業は **現在の作業ディレクトリ直下の一時フォルダ** で行ってください。
-- Flutter package / plugin の場合、依存解決は Dart-only 環境では完全には再現できないことがあります。
-- その場合でも、公開アーカイブの静的棚卸しと direct dependency の説明は継続してください。
-
-## 基本方針
-
-- 公開リポジトリではなく、**実際に pub で配布されるアーカイブ**を優先して確認する
-- まずは静的に構造を理解する
-- 推測と事実を分けて説明する
-- 「重い」「複雑」などの表現には根拠を付ける
-- 自前実装コストは、過大にも過小にも見積もらない
-- 「この程度なら自前でよい」「ここから先は自前だと危険」といった境界を明確にする
+- Flutter package / plugin の場合、依存解決や動作確認は Dart-only 環境では完全には再現できないことがあります。
+- その場合でも、公開アーカイブの静的レビューは継続してください。
 
 ## 絶対に守るルール
 
 - `dart run`, `dart build`, `dart test` を実行してはいけません。
 - `flutter` コマンドは使ってはいけません。
-- example アプリ、Gradle タスク、Xcode build、shell script、補助スクリプトを実行してはいけません。
-- 原則として静的確認のみを行ってください。
-- 実行してよいのは原則として以下です。
+- example アプリ、補助スクリプト、Gradle タスク、Xcode build、CocoaPods install、任意スクリプトを実行してはいけません。
+- 基本方針は **静的確認のみ** です。
+- 実行してよいのは、原則として以下に限ります。
   - `dart pub unpack ... --no-resolve`
   - `dart pub get`
   - `dart pub downgrade`
   - `dart pub deps --json`
   - `find`, `grep`, `sed`, `awk`, `cat`, `ls`, `head`, `tail`
-  - ローカル解析のための安全な `python`
-- ファイルの読み書きは、**現在の作業ディレクトリ直下の一時ディレクトリ配下に限定**してください。
-- 一時ディレクトリ外のファイルは、原則として読み取りのみです。
-- 一時ディレクトリ外に新規ファイルを作成・更新・削除してはいけません。
+  - ローカルファイル解析のための安全な `python`
+- 監査中に「これは静的確認ではなく、パッケージコードや Hook を実行する段階に入る」と判断したら、そこで止まり、その理由を明示してください。
 
-## 一時ディレクトリ
+## 作業ディレクトリ
 
-この skill は、現在の作業ディレクトリ直下に説明専用の一時ディレクトリを作成してください。  
+この skill は、**現在の作業ディレクトリ直下**に監査専用の一時ディレクトリを作成してください。  
 ディレクトリ名は以下を使用してください。
 
-- `.explain_pub_package_tmp/`
+- `.audit_pub_package_tmp/`
 
-その配下に少なくとも以下を作成します。
+この配下に少なくとも以下を作成します。
 
-- `.explain_pub_package_tmp/archives/`
-- `.explain_pub_package_tmp/reviews/`
-- `.explain_pub_package_tmp/sandbox_project/`
+- `.audit_pub_package_tmp/archives/`
+- `.audit_pub_package_tmp/reviews/`
+- `.audit_pub_package_tmp/sandbox_project/`
 
-以後の生成・保存・削除はこの配下に限定してください。
+以後の読み書き・生成・削除は、この一時ディレクトリ配下に限定してください。
 
-## 何を重視して説明するか
+## ファイル操作の境界
 
-この skill は、特に次を重視して説明してください。
+- 一時ディレクトリ配下では、必要なファイル作成・更新・削除を行ってよい
+- 一時ディレクトリの外では、原則として **読み取りのみ**
+- 一時ディレクトリの外に新規ファイルを作成してはいけない
+- 一時ディレクトリの外の既存ファイルを更新・削除してはいけない
 
-### 1. 機能の境界
+## 監査の考え方
 
-- このパッケージは本質的に何をしているのか
-- どこまでがコア機能か
-- どこから先が「おまけ機能」か
-- 利用者が本当に欲しいのはその全機能なのか、一部だけなのか
+これはコード品質レビューではなく、**サプライチェーン監査**です。
 
-### 2. 実装の複雑さ
+以下のようなシグナルを優先的に見てください。
 
-- `lib/` の規模
-- `src/` の深さ
-- クラス数や責務の分散
-- プラットフォームコードの有無
-- FFI、Hook、native asset、build script の有無
-- 実装が単純か、設計の理解が必要か
-- 単なるユーティリティか、状態管理や描画やネイティブ連携まで含むか
+- シークレット、環境変数、SSH 鍵、Git 認証情報、CI 変数、署名ファイル、keystore、provisioning profile、Firebase 認証情報、API トークンなどを読むコード
+- 外部通信、テレメトリ、解析、アップロード、ダウンロード、remote config、隠しエンドポイント
+- 動的コード読み込み、バイナリのダウンロード、シェル実行、プロセス起動
+- 予想外のネイティブコードや FFI
+- 難読化、極端に読みにくい generated code、意図的に読解を妨げる構造
+- Hook、およびビルド時挙動に影響するコード
+- Android の Gradle スクリプト、Manifest、Service、Receiver、Permission、JNI、外部ダウンロード
+- iOS/macOS の Podspec、xcconfig、build phase、shell script、dynamic framework、entitlement、URL/network 関連コード
+- パッケージの本来の目的と実際の挙動の不一致
+- 小さな patch version に不釣り合いな大きな変更
+- platform channel、reflection、広範なファイル探索、clipboard、スクリーンショット、accessibility API、WebView bridge、ランタイム割り込みなどの不審な利用
 
-### 3. 依存関係の重さ
-
-- direct dependency の数
-- 可能なら transitive dependency の数
-- Flutter plugin / native plugin への依存の有無
-- 依存の責務が明確か
-- 小さな目的に対して依存が多すぎないか
-- 依存の導入によって持ち込まれる複雑さが大きくないか
-
-### 4. 更新と保守の見込み
-
-- 最終更新がいつ頃か
-- changelog や release note が継続しているか
-- メンテナンスされていそうか
-- ただし、更新頻度が低いこと自体を自動で悪とみなしてはいけない
-- 「枯れていて更新が少ない」のか「放置されている」のかを区別して説明する
-
-### 5. 自前実装コスト
-
-- 最小限の代替実装ならどの程度で書けそうか
-- 使いたい機能だけに絞れば簡単か
-- エッジケース対応まで含めると急に重くなるか
-- プラットフォーム差異、アクセシビリティ、パフォーマンス、テスト、保守まで考えるとどうか
-- 将来の変更コストはどちらが重いか
+一般的によくある書き方であることを理由に安全とみなしてはいけません。  
+また、不審な記述が見当たらないことをもって安全の証明としてはいけません。
 
 ## 最終出力の形式
 
 最終回答は、必ず次の構成で出力してください。
 
-1. **対象パッケージ**
+1. **監査対象**
    - パッケージ名
-   - 指定されたバージョン
-   - 実際に取得したバージョン
-   - 調査日時
+   - 要求されたバージョン
+   - 実際に取得されたバージョン
+   - 監査日時
 
-2. **一言まとめ**
+2. **総合評価**
    - 次のいずれかを使う
-     - `導入向き`
-     - `やや導入向き`
-     - `状況次第`
-     - `やや自前向き`
-     - `自前向き`
-   - その理由を 2〜5 文で簡潔に述べる
+     - `レビュー範囲では明白な悪意ある挙動は見つからなかった`
+     - `不審`
+     - `高リスク`
+     - `レビュー不完全`
+   - 重要な理由を 3〜8 個の箇条書きで示す
 
-3. **このパッケージは何をしてくれるか**
-   - 主要機能
-   - 利用者が得る価値
-   - どの用途に向くか
-   - 逆に、過剰になりそうなケース
+3. **何をレビューしたか**
+   - 対象パッケージのどのパスを確認したか
+   - Android コードの有無
+   - iOS / macOS コードの有無
+   - Hook 関連ファイルや Hook を示唆する構成の有無
+   - 依存情報をどこまで確認できたか
+   - Dart-only 環境による制約があったか
 
-4. **内部構成の概要**
-   - 主なディレクトリと責務
-   - Dart コードの規模感
-   - プラットフォームコードの有無
-   - Hook / build script / native asset / FFI の有無
-   - 設計の複雑さについての所感
+4. **発見事項**
+   - `Critical`
+   - `High`
+   - `Medium`
+   - `Low`
+   - `Informational`
+   各項目について次を含める
+   - タイトル
+   - 重大度
+   - 根拠となるファイルパス
+   - それが問題になる理由
+   - 明確に悪意があるのか、不審なのか、妥当な可能性はあるがレビュー継続が必要なのか
 
-5. **依存関係の評価**
-   - direct dependency 数
-   - 可能なら transitive dependency 数
-   - 特に重い依存や気になる依存
-   - 「目的に対して依存が多いか少ないか」の評価
-   - 将来のメンテナンス負担への影響
+5. **Hooks レビュー**
+   - Hook 関連機能がありそうか
+   - 注意すべきファイルと記述
+   - build 時ダウンロード、native asset 生成、build/run/test 時の副作用の可能性
+   - この監査では Hook を実行していないことを明記する
 
-6. **懸念点**
-   - 依存の多さ
-   - 実装の複雑さ
-   - ネイティブコードの存在
-   - 更新頻度や保守性
-   - API 設計の癖
-   - 自前で置き換えにくい部分
-   - 各懸念点について、なぜ気になるのかを書く
+6. **プラットフォーム別レビュー**
+   - Android
+   - iOS / macOS
+   - FFI / ネイティブバイナリ
 
-7. **自前実装した場合の見積もり**
-   - 最小限の代替実装の難易度
-   - 実用レベルまで持っていく難易度
-   - テストや保守を含めた難易度
-   - 主なリスク
-   - 「見た目より簡単」なのか「見た目より難しい」なのか
+7. **依存関係レビュー**
+   - `pubspec.yaml` から読める direct dependencies
+   - 可能なら `dart pub get` / `dart pub downgrade` で確認できた結果
+   - 確認できなかった場合はその理由
+   - 個別に unpack して確認した依存
+   - 未レビューの依存
 
-8. **導入 vs 自前 の比較**
-   - 導入のメリット
-   - 導入のデメリット
-   - 自前実装のメリット
-   - 自前実装のデメリット
-   - どういう条件なら導入がよいか
-   - どういう条件なら自前がよいか
-
-9. **結論**
-   - `導入を勧める`
-   - `条件付きで導入を勧める`
-   - `まずは小さく自前実装を勧める`
-   - `自前実装を勧める`
-   - 理由を短くまとめる
-
-10. **限界と不確実性**
+8. **限界と不確実性**
+   - この監査で証明できないこと
    - 実行していないこと
-   - 調査していないこと
-   - Dart-only 環境ゆえに確認しきれないこと
-   - 推定に留まること
+   - Flutter SDK 非搭載環境ゆえに確認できなかったこと
+   - 引き続き人手レビューが必要な点
+
+9. **推奨アクション**
+   - `導入してよい`
+   - `人手レビュー後に導入`
+   - `保留`
+   - `避ける`
+   - その理由を短く書く
 
 ## 手順
 
@@ -212,39 +176,38 @@ disable-model-invocation: true
 - `TARGET_NAME = $ARGUMENTS[0]`
 - `TARGET_VERSION = $ARGUMENTS[1]`（指定がある場合のみ）
 
-パッケージ名が指定されていない場合は、呼び出し形式を説明して停止してください。
+パッケージ名が指定されていない場合は、期待する呼び出し形式を説明して停止してください。
 
 ### Step 2: 一時ディレクトリを作る
 
-現在の作業ディレクトリ直下に、説明用の一時ディレクトリを作成してください。
+現在の作業ディレクトリ直下に、監査専用の一時ディレクトリを作成してください。
 
-- `.explain_pub_package_tmp/`
+- `.audit_pub_package_tmp/`
 
 この配下に少なくとも以下を作成します。
 
-- `.explain_pub_package_tmp/archives/`
-- `.explain_pub_package_tmp/reviews/`
-- `.explain_pub_package_tmp/sandbox_project/`
+- `.audit_pub_package_tmp/archives/`
+- `.audit_pub_package_tmp/reviews/`
+- `.audit_pub_package_tmp/sandbox_project/`
 
-以後の書き込みはこの配下に限定してください。
-
-### Step 3: 対象パッケージの公開アーカイブを取得する
+### Step 3: 対象パッケージの公開アーカイブだけを取得する
 
 バージョン指定ありの場合:
 
-- `dart pub unpack ${TARGET_NAME}:${TARGET_VERSION} --no-resolve --output=.explain_pub_package_tmp/archives`
+- `dart pub unpack ${TARGET_NAME}:${TARGET_VERSION} --no-resolve --output=.audit_pub_package_tmp/archives`
 
 バージョン指定なしの場合:
 
-- `dart pub unpack ${TARGET_NAME} --no-resolve --output=.explain_pub_package_tmp/archives`
+- `dart pub unpack ${TARGET_NAME} --no-resolve --output=.audit_pub_package_tmp/archives`
 
-作成されたディレクトリ名や `pubspec.yaml` から、実際に取得したバージョンを特定してください。
+作成されたディレクトリ名や `pubspec.yaml` から、**実際に取得された版**を特定してください。
 
-### Step 4: 対象パッケージを静的に棚卸しする
+### Step 4: 対象パッケージを静的確認する
 
-少なくとも以下を確認してください。
+以下のファイルやディレクトリを、存在する限り確認してください。
 
 - `pubspec.yaml`
+- `pubspec.lock`（存在すれば）
 - `README*`
 - `CHANGELOG*`
 - `LICENSE*`
@@ -263,39 +226,56 @@ disable-model-invocation: true
 - `windows/**`
 - `ffi/**`
 - `src/**`
+- generated file や同梱バイナリ
 
-ここで知りたいのは主に以下です。
+特に以下を探してください。
 
-- パッケージの主機能
-- 実装の規模
-- どのレイヤーまで責務を持つか
-- ネイティブ実装の有無
-- 追加のビルド複雑性の有無
-- 説明と実装が一致しているか
+- ネットワーク通信やハードコードされたエンドポイント
+- プロセス実行
+- 想定外に広いファイルシステム探索
+- シークレット収集
+- ダウンロード処理
+- shell script
+- 動的読み込み
+- reflection / introspection
+- native code、podspec、gradle、独自 build ロジック
+- パッケージの説明と噛み合わない処理
 
-### Step 5: Hook や複雑性を必ず説明する
+不審なコードについては、以下を明示してください。
 
-Hook や native asset が見つかった場合は、以下を説明してください。
+- 本番用コードなのか
+- test/example 限定なのか
+- build 時のみなのか
+- 死んだコードなのか
+- まだ判断できないのか
 
-- どのファイルから判断したか
-- どのような build-time complexity を持ち込むか
-- 自前実装と比べてどれだけ判断を難しくするか
+### Step 5: Hook が見つからなくても Hooks セクションは必ず書く
+
+必ず Hooks セクションを出力してください。
+
+Hook や native asset 関連の構成が見つかった場合は、次を説明してください。
+
+- どのファイルからそう判断したか
+- build/run/test 時に何ができそうか
+- なぜそれが重要か
 
 見つからなかった場合でも、次の文言を含めてください。
 
 - `レビューした公開アーカイブ内では、明白な Hook 関連ファイルや native asset 構成は見当たりませんでした。`
 
+そのうえで、**見当たらないことは不存在の証明ではない**と補足してください。
+
 ### Step 6: 依存関係を確認する
 
 まず `pubspec.yaml` から direct dependencies を抽出してください。
 
-次に、Dart-only 環境でも依存解決できそうな場合に限り、
-`.explain_pub_package_tmp/sandbox_project/pubspec.yaml` を作り、対象パッケージの実際に取得した版を依存に含めてください。
+次に、Dart-only 環境でも安全に依存解決できそうな場合に限り、
+`.audit_pub_package_tmp/sandbox_project/pubspec.yaml` を最小構成で作成し、対象パッケージの実際に取得された版を依存に含めてください。
 
 例:
 
 ```yaml
-name: explain_pub_package_sandbox
+name: audit_sandbox
 environment:
   sdk: ">=3.0.0 <4.0.0"
 
@@ -303,7 +283,7 @@ dependencies:
   TARGET_NAME: TARGET_VERSION
 ```
 
-その後、必要に応じて以下を実行してください。
+その後、以下を試してよいです。
 
 - `dart pub get`
 - `dart pub deps --json`
@@ -314,129 +294,128 @@ dependencies:
 - `dart pub downgrade`
 - `dart pub deps --json`
 
-依存解決に失敗した場合は、無理に続行せず、次のように扱ってください。
+ただし、Flutter SDK が必要で解決できない場合は、無理に続行してはいけません。  
+その場合は、以下を行ってください。
 
-- 失敗理由を記録する
-- `pubspec.yaml` ベースの direct dependency 説明に切り替える
-- transitive dependency 数は「確認できず」と明記する
+- 失敗内容を記録する
+- `pubspec.yaml` ベースの依存情報レビューに切り替える
+- 総合評価ではその制約を明記する
 
-### Step 7: 依存関係の重さを評価する
+### Step 7: 推移的依存を必要に応じてレビューする
 
-推移的依存のすべてを深掘りする必要はありません。  
-ただし、以下は優先的に説明してください。
+すべての推移的依存を深く見る必要はありません。  
+以下を優先してください。
 
-- direct dependency 数
-- 可能なら transitive dependency 数
-- Flutter plugin / ネイティブ依存
-- FFI / Hook / native asset を含む依存
-- 目的に対して重すぎると感じる依存
-- バージョンのぶれ幅が大きい依存
+1. direct dependency
+2. 目的に比べて重そうな dependency
+3. プラットフォームコードを含みそうな dependency
+4. Hook や native asset を含みそうな dependency
+5. ネットワーク / プロセス / ファイルシステム操作を持ちそうな dependency
+6. 知名度が低い、公開直後、目的に対して挙動が不自然な dependency
 
-必要に応じて個別に以下を行ってよいです。
+各依存について、必要に応じて次を行います。
 
-- `dart pub unpack <name>:<version> --no-resolve --output=.explain_pub_package_tmp/archives`
+- `dart pub unpack <name>:<version> --no-resolve --output=.audit_pub_package_tmp/archives`
 
-ただし、この skill の主目的はセキュリティ監査ではなく、**導入コストと自前実装コストの比較**です。  
-そのため、依存の個別レビューは、重さや複雑さの説明に必要な範囲で十分です。
+そのうえで、対象パッケージと同様の静的レビューを行ってください。
 
-### Step 8: 更新状況を確認する
+**すべての依存を深く見たふりをしてはいけません。**  
+どれを深く見たか、どれは列挙だけかを明確にしてください。
 
-`CHANGELOG*`、`pubspec.yaml`、アーカイブ内の記述から、以下を確認してください。
+### Step 8: 不審判定のヒューリスティクス
 
-- 最近まで更新されていそうか
-- 長く更新が止まっていそうか
-- 小規模でも安定運用されていそうか
-- API が落ち着いていそうか
+次のような組み合わせがあれば重大度を上げてください。
 
-更新が少ないことを即座に否定的に扱ってはいけません。  
-「枯れている」のか「放置されている」のか、理由付きで説明してください。
+- 単純な UI / utility パッケージのはずなのに、アップロード・ダウンロード・隠し通信・shell 実行・ネイティブバイナリを含む
+- patch version なのに networking、telemetry、build script、難読化、新しいプラットフォームコードが増えている
+- build 時に外部から成果物を取得する
+- plugin コードが広い Android 権限を追加している
+- podspec や gradle が不自然な remote fetch を行っている
+- コメントや関数名が debugging、exfiltration、persistence、self-update を示唆する
 
-### Step 9: 自前実装コストを評価する
+逆に、次のような場合は重大度を下げてもよいです。
 
-以下の観点から、自前実装コストを推定してください。
+- test 専用で、本番 / build パスから到達しない
+- 通信処理がパッケージの本来目的そのものであり、README にも説明がある
+- generated file が通常のツール由来で、目的とも整合している
 
-- 1ファイル程度の小さな utility で代替できそうか
-- Dart / Flutter のコード数ファイルで代替できそうか
-- 状態管理や複雑な API 設計が必要か
-- プラットフォームチャネルやネイティブ実装が必要か
-- エッジケース処理が多いか
-- テストや保守にどれだけ気を使う必要があるか
+ただし、その場合でも記録は残してください。
 
-ここでは、少なくとも次の 3 段階で整理してください。
+### Step 9: 根拠を必ず示す
 
-- 最小実装
-- 実用実装
-- 安定運用実装
+重要な主張には必ず根拠を付けてください。
 
-### Step 10: 判断の原則
+- ファイルパス
+- 短い抜粋、または具体的な記述内容
+- それがなぜ問題なのか
 
-次のような場合は、自前寄りに傾けてください。
+長いコード全文は貼らず、要点だけ引用してください。
 
-- やりたいことが単純
-- パッケージが重い
-- 依存が多い
-- 一部の機能しか使わない
-- ネイティブコードや build complexity を持ち込みたくない
-- 置き換え実装がそこまで難しくない
+### Step 10: 禁止される結論
 
-次のような場合は、導入寄りに傾けてください。
+以下の表現は禁止です。
 
-- 自前では見落としやすいエッジケースが多い
-- プラットフォーム差異の吸収が大変
-- API や描画や状態同期がかなり作り込まれている
-- テスト済みであることの価値が高い
-- 依存や実装の重さに見合うだけの価値がある
+- `安全`
+- `無害`
+- `クリーン`
+- `セキュアであることを確認した`
 
-### Step 11: 禁止される表現
+代わりに、以下のように表現してください。
 
-以下のような断定は禁止です。
+- `レビュー範囲では明白な悪意ある挙動は見つかりませんでした`
+- `確認したファイルの範囲では不審な挙動は見当たりませんでしたが、保証ではありません`
+- `引き続き人手レビューを推奨します`
 
-- `絶対に自前の方がよい`
-- `絶対に導入すべき`
-- `このパッケージは無価値`
-- `この程度は簡単`
+### Step 11: 依存解決に失敗した場合
 
-代わりに、条件付きで説明してください。
+`dart pub get` が SDK 制約や Flutter SDK 不在などで失敗した場合でも、
 
-- `この用途に限れば、自前実装の方が軽い可能性があります`
-- `広い要件を考えると、導入の方が妥当です`
-- `最低限の用途なら自前で足りそうですが、運用まで考えると再検討が必要です`
+- 対象パッケージ本体の静的レビューは完了する
+- 失敗内容を正確に報告する
+- 総合評価は必要に応じて `レビュー不完全` とする
+- 安全に続行するために何が必要か、可能なら説明する
 
-## 実際に見るべきシグナル
+## 実際に探すべきパターン
 
-以下を検索・確認してください。
+レビュー時には、以下のキーワードや API を積極的に検索してください。
 
-- `dependency`, `dependencies`, `dev_dependencies`
-- `plugin`, `platforms`
-- `ffi`
-- `native_assets`
-- `hook`, `build`
-- `MethodChannel`, `EventChannel`
-- `RenderObject`, `CustomPainter`, `Ticker`, `AnimationController`
-- `http`, `dio`, `WebSocket`
-- `File`, `Directory`
-- `Platform`
-- Android Manifest, Gradle, Podspec
-- generated code
-- 大きな `src/` 構造
-- examples の多さ
-- テストコードの有無
+- `http`, `dio`, `socket`, `WebSocket`, `InternetAddress`, `RawSocket`
+- `Process.run`, `Process.start`, `shell`, `bash`, `sh`, `cmd`
+- `File`, `Directory`, `Platform.environment`
+- `MethodChannel`, `EventChannel`, `BasicMessageChannel`
+- `DynamicLibrary.open`, `ffi`
+- `curl`, `wget`, `git clone`, `pod`, `gradle`, `exec`
+- `URLSession`, `NSURL`, `OkHttp`, `HttpURLConnection`
+- `keystore`, `provisioning`, `sign`, `credentials`, `token`, `secret`, `key`
+- `hook`, `native_asset`, `build`, `download`, `bundle`
+
+また、以下も確認してください。
+
+- 追加された permission
+- background service
+- broadcast receiver
+- custom URL scheme
+- clipboard access
+- WebView bridge
+- analytics SDK
+- バイナリ blob や圧縮アーカイブ
 
 ## 推奨する進め方
 
-- まず README と pubspec で「何をするパッケージか」を掴む
-- 次に lib / src の構造を見て「実装の重さ」を掴む
-- その後プラットフォームコードや Hook の有無を見る
-- 次に確認可能な範囲で依存関係の重さを把握する
-- 最後に、自前実装した場合の最小構成と運用コストを見積もる
+- 最初に全体の棚卸しをする
+- 次に不審ポイントへ絞る
+- その後、確認可能な依存情報を見る
+- メモは `.audit_pub_package_tmp/reviews/` に残す
+- 最後に簡潔なレポートと明確な推奨アクションを書く
 
 ## 成功条件
 
-良いレポートとは、次を満たすものです。
+良い監査とは、次を満たすものです。
 
-- 公開アーカイブの実体を見ている
-- パッケージが実際に何をしているかを説明できる
-- 依存関係の重さを根拠付きで説明できる
-- 自前実装コストを過不足なく見積もれている
-- 「導入か自前か」を条件付きで判断できる
+- GitHub リポジトリではなく **実際に公開されたアーカイブ** を確認している
+- 不要にパッケージコードを実行していない
+- 根拠と推測を区別している
+- Dart / Android / iOS / macOS / Hooks 関連を確認している
+- Dart-only 環境で確認できる依存情報を正直に扱っている
 - 不確実性や未確認範囲を正直に書いている
+
